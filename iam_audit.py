@@ -120,7 +120,7 @@ for user in users:
         print("    [FAIL] Console access WITHOUT MFA!")
         compliance_status = 'FAIL'
 
-    # No console access does not require MFA>
+    # No console access does not require MFA.
     else:
         no_console_count += 1
         print("    [INFO] No console access (MFA not required).")
