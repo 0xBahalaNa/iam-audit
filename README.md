@@ -148,3 +148,7 @@ This tool supports compliance and audit requirements:
 - Email alerts for non-compliant users
 - Root account MFA verification
 - Password policy compliance checks
+
+## Framework Reference
+
+Control family mappings and AWS implementation details are documented in [nist-800-53-rev-5-to-aws-mapping](https://github.com/0xBahalaNa/nist-800-53-rev-5-to-aws-mapping).
