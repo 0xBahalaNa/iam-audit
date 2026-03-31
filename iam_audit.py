@@ -113,7 +113,7 @@ for user in users:
     try:
         iam.get_login_profile(UserName=username)
         has_console = True
-    except:
+    except iam.exceptions.NoSuchEntityException:
         has_console = False
 
     # Evaluate compliance based on both checks.
