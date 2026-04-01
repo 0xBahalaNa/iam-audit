@@ -100,9 +100,11 @@ def audit_user(iam, username):
     """
     print(f"Checking: {username}")
 
-    # Check returns a list of MFA devices. Empty list means no MFA.
-    mfa_response = iam.list_mfa_devices(UserName=username)
-    mfa_devices = mfa_response['MFADevices']
+    # Paginate list_mfa_devices() for completeness. Empty list means no MFA.
+    mfa_paginator = iam.get_paginator('list_mfa_devices')
+    mfa_devices = []
+    for page in mfa_paginator.paginate(UserName=username):
+        mfa_devices.extend(page['MFADevices'])
 
     # Check to see if user has console access. Throws except if no console access.
     try:
@@ -125,8 +127,10 @@ def audit_user(iam, username):
     # Check access key age for compliance with rotation policy.
     # IA-5(1) requires periodic authenticator rotation — 90-day threshold
     # matches CIS AWS Benchmark 1.14 and common FedRAMP/CJIS expectations.
-    keys_response = iam.list_access_keys(UserName=username)
-    access_keys = keys_response['AccessKeyMetadata']
+    keys_paginator = iam.get_paginator('list_access_keys')
+    access_keys = []
+    for page in keys_paginator.paginate(UserName=username):
+        access_keys.extend(page['AccessKeyMetadata'])
 
     # Track the oldest key and whether any active key exceeds 90 days.
     oldest_key_age = 0
@@ -181,9 +185,12 @@ def run_audit():
     # Create IAM client to interact with AWS IAM service.
     iam = boto3.client('iam')
 
-    # Get a list of all IAM users in the account.
-    iam_users = iam.list_users()
-    users = iam_users['Users']
+    # Paginate list_users() to retrieve all users regardless of account size.
+    # Default API response is capped at 100 users per call.
+    paginator = iam.get_paginator('list_users')
+    users = []
+    for page in paginator.paginate():
+        users.extend(page['Users'])
     total_users = len(users)
 
     audit_results = []
