@@ -82,29 +82,24 @@ def export_to_json(audit_results, metadata, timestamp):
     return filename
 
 
-# Create IAM client to interact with AWS IAM service.
-iam = boto3.client('iam')
+def audit_user(iam, username):
+    """
+    Audit a single IAM user for MFA and access key compliance.
 
-# Get a list of all IAM users in the account.
-iam_users = iam.list_users()  
-users = iam_users['Users']
+    Checks whether the user has console access, whether MFA is enabled,
+    and whether any active access keys exceed the 90-day rotation threshold.
 
-# Counters to track compliance stats.
-total_users = len(users)
-compliant_count = 0
-no_console_count = 0
-keys_compliant_count = 0
-keys_noncompliant_count = 0
+    Args:
+        iam: boto3 IAM client
+        username: IAM username to audit
 
-# Data collection for export and audit trail.
-audit_results = []
-audit_start = datetime.now()
-
-# Main loop to check each user for MFA compliance. 
-for user in users:
-    username = user['UserName']
+    Returns:
+        dict containing user audit results with keys: username,
+        has_console_access, mfa_enabled, compliance_status,
+        access_key_count, oldest_key_age_days, key_compliance_status
+    """
     print(f"Checking: {username}")
-    
+
     # Check returns a list of MFA devices. Empty list means no MFA.
     mfa_response = iam.list_mfa_devices(UserName=username)
     mfa_devices = mfa_response['MFADevices']
@@ -117,20 +112,13 @@ for user in users:
         has_console = False
 
     # Evaluate compliance based on both checks.
-    # Console user with MFA enabled.
     if has_console and mfa_devices:
-        compliant_count += 1
         print("    [PASS] MFA enabled for console user.")
         compliance_status = 'PASS'
-
-    # Console user without MFA enabled.
     elif has_console and not mfa_devices:
         print("    [FAIL] Console access WITHOUT MFA!")
         compliance_status = 'FAIL'
-
-    # No console access does not require MFA.
     else:
-        no_console_count += 1
         print("    [INFO] No console access (MFA not required).")
         compliance_status = 'INFO'
 
@@ -167,15 +155,12 @@ for user in users:
 
         if user_keys_compliant:
             key_compliance = 'PASS'
-            keys_compliant_count += 1
         else:
             key_compliance = 'FAIL'
-            keys_noncompliant_count += 1
     else:
         print("    [N/A] No access keys.")
 
-    # Store user audit data for export.
-    user_record = {
+    return {
         'username': username,
         'has_console_access': has_console,
         'mfa_enabled': bool(mfa_devices),
@@ -184,54 +169,87 @@ for user in users:
         'oldest_key_age_days': oldest_key_age,
         'key_compliance_status': key_compliance
     }
-    audit_results.append(user_record)
 
-# Capture audit completion time and calculate elapsed time.
-audit_end = datetime.now()
-elapsed = (audit_end - audit_start).total_seconds()
 
-# Compliance summary of results.
-print("\n" + "=" * 40)
-print("MFA Compliance:")
-print(f"  Total users: {total_users}")
-print(f"  Compliant (MFA enabled): {compliant_count}")
-print(f"  No console access: {no_console_count}")
-print(f"  Non-compliant: {total_users - compliant_count - no_console_count}")
+def run_audit():
+    """
+    Run the full IAM audit across all users.
 
-# Users with at least one access key — denominator for key compliance rate.
-users_with_keys = keys_compliant_count + keys_noncompliant_count
+    Creates an IAM client, checks every user for MFA and access key
+    compliance, prints a summary, and exports results to CSV and JSON.
+    """
+    # Create IAM client to interact with AWS IAM service.
+    iam = boto3.client('iam')
 
-print(f"\nAccess Key Compliance (90-day rotation):")
-print(f"  Users with keys: {users_with_keys}")
-print(f"  Compliant: {keys_compliant_count}")
-print(f"  Non-compliant: {keys_noncompliant_count}")
+    # Get a list of all IAM users in the account.
+    iam_users = iam.list_users()
+    users = iam_users['Users']
+    total_users = len(users)
 
-# Calculate compliance rates for GRC reporting.
-compliance_rate = (compliant_count / total_users * 100) if total_users > 0 else 0
-key_compliance_rate = (keys_compliant_count / users_with_keys * 100) if users_with_keys > 0 else 0
+    audit_results = []
+    audit_start = datetime.now()
 
-# Display audit trail timestamps.
-print(f"\nAudit started: {audit_start.isoformat()}")
-print(f"Audit completed: {audit_end.isoformat()}")
-print(f"Elapsed time: {elapsed:.2f} seconds")
-print(f"MFA compliance rate: {compliance_rate:.1f}%")
-print(f"Key compliance rate: {key_compliance_rate:.1f}%")
+    # Check each user for MFA and access key compliance.
+    for user in users:
+        result = audit_user(iam, user['UserName'])
+        audit_results.append(result)
 
-# Export results to CSV and JSON for compliance reporting.
-timestamp_str = audit_start.isoformat().replace(':', '-').split('.')[0]
+    # Capture audit completion time and calculate elapsed time.
+    audit_end = datetime.now()
+    elapsed = (audit_end - audit_start).total_seconds()
 
-metadata = {
-    'start_time': audit_start.isoformat(),
-    'end_time': audit_end.isoformat(),
-    'elapsed_seconds': elapsed,
-    'total_users': total_users,
-    'compliance_rate': f"{compliance_rate:.1f}%",
-    'key_compliance_rate': f"{key_compliance_rate:.1f}%"
-}
+    # Derive compliance counts from results.
+    compliant_count = sum(1 for r in audit_results if r['compliance_status'] == 'PASS')
+    no_console_count = sum(1 for r in audit_results if r['compliance_status'] == 'INFO')
+    keys_compliant_count = sum(1 for r in audit_results if r['key_compliance_status'] == 'PASS')
+    keys_noncompliant_count = sum(1 for r in audit_results if r['key_compliance_status'] == 'FAIL')
 
-csv_file = export_to_csv(audit_results, timestamp_str)
-json_file = export_to_json(audit_results, metadata, timestamp_str)
+    # Compliance summary of results.
+    print("\n" + "=" * 40)
+    print("MFA Compliance:")
+    print(f"  Total users: {total_users}")
+    print(f"  Compliant (MFA enabled): {compliant_count}")
+    print(f"  No console access: {no_console_count}")
+    print(f"  Non-compliant: {total_users - compliant_count - no_console_count}")
 
-print(f"\nResults exported to:")
-print(f"  - {csv_file}")
-print(f"  - {json_file}")
+    # Users with at least one access key — denominator for key compliance rate.
+    users_with_keys = keys_compliant_count + keys_noncompliant_count
+
+    print(f"\nAccess Key Compliance (90-day rotation):")
+    print(f"  Users with keys: {users_with_keys}")
+    print(f"  Compliant: {keys_compliant_count}")
+    print(f"  Non-compliant: {keys_noncompliant_count}")
+
+    # Calculate compliance rates for GRC reporting.
+    compliance_rate = (compliant_count / total_users * 100) if total_users > 0 else 0
+    key_compliance_rate = (keys_compliant_count / users_with_keys * 100) if users_with_keys > 0 else 0
+
+    # Display audit trail timestamps.
+    print(f"\nAudit started: {audit_start.isoformat()}")
+    print(f"Audit completed: {audit_end.isoformat()}")
+    print(f"Elapsed time: {elapsed:.2f} seconds")
+    print(f"MFA compliance rate: {compliance_rate:.1f}%")
+    print(f"Key compliance rate: {key_compliance_rate:.1f}%")
+
+    # Export results to CSV and JSON for compliance reporting.
+    timestamp_str = audit_start.isoformat().replace(':', '-').split('.')[0]
+
+    metadata = {
+        'start_time': audit_start.isoformat(),
+        'end_time': audit_end.isoformat(),
+        'elapsed_seconds': elapsed,
+        'total_users': total_users,
+        'compliance_rate': f"{compliance_rate:.1f}%",
+        'key_compliance_rate': f"{key_compliance_rate:.1f}%"
+    }
+
+    csv_file = export_to_csv(audit_results, timestamp_str)
+    json_file = export_to_json(audit_results, metadata, timestamp_str)
+
+    print(f"\nResults exported to:")
+    print(f"  - {csv_file}")
+    print(f"  - {json_file}")
+
+
+if __name__ == '__main__':
+    run_audit()
