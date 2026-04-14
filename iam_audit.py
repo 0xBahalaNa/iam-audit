@@ -11,6 +11,9 @@ Output:
     [FAIL] - Console user WITHOUT MFA / Active access key over 90 days old
     [INFO] - No console access (programmatic only, MFA not required)
     [N/A]  - No access keys exist for the user
+Alerting:
+    If IAM_AUDIT_SNS_TOPIC_ARN is set, a summary of non-compliant findings
+    is published to the given SNS topic at the end of the audit run.
 Usage:
     python iam_audit.py
 Requirements:
@@ -20,9 +23,11 @@ Requirements:
 
 # Import associated AWS module for script.
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from datetime import datetime, timezone
 import csv
 import json
+import os
 
 
 def export_to_csv(audit_results, timestamp):
@@ -218,6 +223,103 @@ def audit_user(iam, user):
     }
 
 
+def send_compliance_alert(audit_results, metadata):
+    """
+    Publish a summary alert to SNS when non-compliant findings exist.
+
+    Reads the SNS topic ARN from the IAM_AUDIT_SNS_TOPIC_ARN environment
+    variable. If unset, alerting is skipped so the audit remains runnable
+    without any SNS configuration. If set but no findings exist, the alert
+    is also skipped to avoid zero-finding noise. Maps to SI-5 (Security
+    Alerts, Advisories, and Directives).
+
+    Args:
+        audit_results: List of dictionaries from audit_user() calls
+        metadata: Dictionary containing audit metadata (timestamps, rates, counts)
+
+    Returns:
+        str: SNS MessageId on successful publish, or None if alert was skipped
+    """
+    # os.environ.get() mirrors dict.get() — returns None when the variable
+    # is unset instead of raising KeyError (PCC3e Ch. 6). Keeping the ARN
+    # out of the code lets the same script run against any account without
+    # a code change, and keeps ARNs out of git history.
+    topic_arn = os.environ.get('IAM_AUDIT_SNS_TOPIC_ARN')
+    if not topic_arn:
+        print("\n[INFO] SNS alerting skipped (IAM_AUDIT_SNS_TOPIC_ARN not set).")
+        return None
+
+    # Collect failures across all three compliance dimensions so a single
+    # alert covers the full audit, not just MFA.
+    mfa_failures = [r for r in audit_results if r['compliance_status'] == 'FAIL']
+    key_failures = [r for r in audit_results if r['key_compliance_status'] == 'FAIL']
+    activity_failures = [r for r in audit_results if r['activity_status'] == 'FAIL']
+
+    total_failures = len(mfa_failures) + len(key_failures) + len(activity_failures)
+
+    if total_failures == 0:
+        print("\n[INFO] SNS alerting skipped (no non-compliant findings).")
+        return None
+
+    # Build the alert body as a list of lines, then join once — cheaper than
+    # repeated string concatenation and easier to reorder (PCC3e Ch. 4).
+    lines = [
+        f"IAM Audit Alert - {metadata['end_time']}",
+        "",
+        f"Non-compliant findings detected in audit of {metadata['total_users']} users.",
+        "",
+        "Summary:",
+        f"  MFA compliance rate:      {metadata['compliance_rate']}",
+        f"  Key compliance rate:      {metadata['key_compliance_rate']}",
+        f"  Activity compliance rate: {metadata['activity_compliance_rate']}",
+        "",
+    ]
+
+    if mfa_failures:
+        lines.append(f"Console access WITHOUT MFA ({len(mfa_failures)}):")
+        for r in mfa_failures:
+            lines.append(f"  - {r['username']}")
+        lines.append("")
+
+    if key_failures:
+        lines.append(f"Access keys exceeding 90-day rotation ({len(key_failures)}):")
+        for r in key_failures:
+            lines.append(f"  - {r['username']} (oldest key: {r['oldest_key_age_days']} days)")
+        lines.append("")
+
+    if activity_failures:
+        lines.append(f"Inactive users 90+ days ({len(activity_failures)}):")
+        for r in activity_failures:
+            lines.append(
+                f"  - {r['username']} ({r['days_inactive']} days inactive, "
+                f"last activity: {r['last_activity_date']})"
+            )
+        lines.append("")
+
+    message = "\n".join(lines)
+    subject = f"IAM Audit Alert: {total_failures} non-compliant findings"
+
+    # SNS Subject is capped at 100 ASCII characters — our format stays well
+    # under that limit even for large finding counts.
+    sns = boto3.client('sns')
+
+    # SNS is a system boundary. The CSV/JSON are already written by the time
+    # we reach this point, so a publish failure should not crash the audit —
+    # log it and move on (CLAUDE.md: validate at system boundaries).
+    try:
+        response = sns.publish(
+            TopicArn=topic_arn,
+            Subject=subject,
+            Message=message
+        )
+    except (ClientError, BotoCoreError) as e:
+        print(f"\n[WARN] SNS alert failed to publish: {e}")
+        return None
+
+    print(f"\n[INFO] SNS alert published (MessageId: {response['MessageId']})")
+    return response['MessageId']
+
+
 def run_audit():
     """
     Run the full IAM audit across all users.
@@ -308,6 +410,9 @@ def run_audit():
     print(f"\nResults exported to:")
     print(f"  - {csv_file}")
     print(f"  - {json_file}")
+
+    # Publish SNS alert if configured and non-compliant findings exist.
+    send_compliance_alert(audit_results, metadata)
 
 
 if __name__ == '__main__':
