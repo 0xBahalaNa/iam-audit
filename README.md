@@ -159,6 +159,10 @@ Access keys exceeding 90-day rotation (1):
   - service-account (oldest key: 142 days)
 ```
 
+**Verified delivery** (sensitive values redacted):
+
+![Screenshot of a compliance alert email delivered via SNS, showing audit summary statistics and a flagged access key finding](docs/images/sns-alert-email.png)
+
 The IAM identity running the script needs `sns:Publish` on the topic.
 
 ## Key Concepts Learned
