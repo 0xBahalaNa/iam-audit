@@ -101,6 +101,66 @@ lambda-role-user,False,False,INFO
 }
 ```
 
+## Alerting
+
+When the `IAM_AUDIT_SNS_TOPIC_ARN` environment variable is set, the audit publishes a summary of non-compliant findings to the given SNS topic at the end of each run. Maps to NIST 800-53 **SI-5** (Security Alerts, Advisories, and Directives).
+
+Alerts cover all three compliance dimensions (MFA, access key rotation, user inactivity) in a single summary message per audit run. No alert is published when the environment variable is unset or when zero findings exist.
+
+### Setup
+
+Create an SNS topic, subscribe your email, and export the ARN before running the audit:
+
+```bash
+# 1. Create the SNS topic (one-time)
+aws sns create-topic --name iam-audit-alerts --region <your-region>
+
+# 2. Subscribe your email (one-time; confirm the link AWS sends you)
+aws sns subscribe \
+  --topic-arn arn:aws:sns:<your-region>:<your-account>:iam-audit-alerts \
+  --protocol email \
+  --notification-endpoint you@example.com \
+  --region <your-region>
+
+# 3. Export the ARN (add to ~/.bashrc or ~/.zshrc for persistence)
+export IAM_AUDIT_SNS_TOPIC_ARN="arn:aws:sns:<your-region>:<your-account>:iam-audit-alerts"
+
+# 4. Run the audit
+python iam_audit.py
+```
+
+### Behavior
+
+| Condition | Result |
+|-----------|--------|
+| `IAM_AUDIT_SNS_TOPIC_ARN` unset | Alerting skipped; audit completes normally |
+| Topic ARN set, zero findings | Alerting skipped; no noise email |
+| Topic ARN set, findings exist | Summary email published with MessageId logged |
+| Topic ARN invalid or SNS error | `[WARN]` logged; audit still completes with exit 0 |
+
+### Sample Alert
+
+```
+Subject: IAM Audit Alert: 2 non-compliant findings
+
+IAM Audit Alert - 2026-04-14T14:36:38
+
+Non-compliant findings detected in audit of 5 users.
+
+Summary:
+  MFA compliance rate:      80.0%
+  Key compliance rate:      75.0%
+  Activity compliance rate: 100.0%
+
+Console access WITHOUT MFA (1):
+  - developer
+
+Access keys exceeding 90-day rotation (1):
+  - service-account (oldest key: 142 days)
+```
+
+The IAM identity running the script needs `sns:Publish` on the topic.
+
 ## Key Concepts Learned
 
 ### AWS IAM API
@@ -143,9 +203,6 @@ This tool supports compliance and audit requirements:
 
 ## Future Enhancements
 
-- Check access key age
-- Flag inactive users (90+ days)
-- Email alerts for non-compliant users
 - Root account MFA verification
 - Password policy compliance checks
 
