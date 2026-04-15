@@ -1,7 +1,10 @@
 """
 iam_audit.py
-Audits all IAM users in your AWS account for MFA and access key compliance.
-Checks performed:
+Audits the AWS root account and all IAM users for MFA and access key compliance.
+Account-level checks:
+    - Root account MFA status (enabled/disabled)
+    - Root account MFA device type (hardware/virtual; FedRAMP High prefers hardware)
+Per-user checks:
     1. Console Access - Does the user have a password to log into AWS Console?
     2. MFA Status - If they have console access, is MFA enabled?
     3. Access Key Age - Are any active access keys older than 90 days?
@@ -30,12 +33,17 @@ import json
 import os
 
 
-def export_to_csv(audit_results, timestamp):
+def export_to_csv(audit_results, root_info, timestamp):
     """
     Export audit results to CSV file with timestamp in filename.
 
+    The root account appears as the first row with username '<ROOT>' and
+    mfa_type populated ('hardware', 'virtual', or 'none'). IAM user rows
+    leave mfa_type blank — the field is account-level, not per-user.
+
     Args:
         audit_results: List of dictionaries containing user audit data
+        root_info: Dictionary from audit_root_account() with root MFA details
         timestamp: ISO 8601 timestamp string for filename
 
     Returns:
@@ -44,14 +52,34 @@ def export_to_csv(audit_results, timestamp):
     filename = f"iam_audit_{timestamp}.csv"
 
     fieldnames = [
-        'username', 'has_console_access', 'mfa_enabled', 'compliance_status',
-        'access_key_count', 'oldest_key_age_days', 'key_compliance_status',
-        'last_activity_date', 'days_inactive', 'activity_status'
+        'username', 'has_console_access', 'mfa_enabled', 'mfa_type',
+        'compliance_status', 'access_key_count', 'oldest_key_age_days',
+        'key_compliance_status', 'last_activity_date', 'days_inactive',
+        'activity_status'
     ]
+
+    # Root has no access keys tracked here, no concept of console-vs-
+    # programmatic (console always available), and no activity timestamp
+    # accessible via IAM APIs. Non-applicable fields are empty strings so
+    # downstream readers (pandas, Excel) parse them cleanly.
+    root_row = {
+        'username': '<ROOT>',
+        'has_console_access': True,
+        'mfa_enabled': root_info['root_mfa_enabled'],
+        'mfa_type': root_info['root_mfa_type'],
+        'compliance_status': root_info['root_mfa_status'],
+        'access_key_count': '',
+        'oldest_key_age_days': '',
+        'key_compliance_status': 'N/A',
+        'last_activity_date': '',
+        'days_inactive': '',
+        'activity_status': 'N/A'
+    }
 
     with open(filename, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
+        writer.writerow(root_row)
         writer.writerows(audit_results)
 
     return filename
@@ -80,7 +108,10 @@ def export_to_json(audit_results, metadata, timestamp):
             'compliance_rate': metadata['compliance_rate'],
             'key_compliance_rate': metadata['key_compliance_rate'],
             'activity_compliance_rate': metadata['activity_compliance_rate'],
-            'inactive_users': metadata['inactive_users']
+            'inactive_users': metadata['inactive_users'],
+            'root_mfa_enabled': metadata['root_mfa_enabled'],
+            'root_mfa_type': metadata['root_mfa_type'],
+            'root_mfa_status': metadata['root_mfa_status']
         },
         'findings': audit_results
     }
@@ -89,6 +120,80 @@ def export_to_json(audit_results, metadata, timestamp):
         json.dump(report, jsonfile, indent=4)
 
     return filename
+
+
+def audit_root_account(iam):
+    """
+    Audit the AWS root account for MFA status and device type.
+
+    The root account is the highest-privilege identity in an AWS account
+    and cannot be replaced by an IAM user. FedRAMP High and CJIS v6.0
+    5.6.2.2 require MFA on privileged accounts; FedRAMP High further
+    recommends a hardware MFA device for root specifically.
+
+    get_account_summary() returns a SummaryMap of integer flags —
+    AccountMFAEnabled is 0 or 1. To distinguish hardware from virtual MFA
+    when enabled, we cross-reference against list_virtual_mfa_devices().
+    The root account has no UserName (it is not an IAM user), so it is
+    identified by its User.Arn ending in ':root'. If AccountMFAEnabled=1
+    and the root device is NOT in the virtual list, the device is
+    physical hardware.
+
+    Args:
+        iam: boto3 IAM client
+
+    Returns:
+        dict with keys:
+            root_mfa_enabled (bool)
+            root_mfa_type (str): 'hardware', 'virtual', or 'none'
+            root_mfa_status (str): 'PASS' or 'FAIL'
+    """
+    # SummaryMap uses integer flags (0/1). dict.get() defaults to 0 if the
+    # key ever disappears in a future API change (PCC3e Ch. 6).
+    summary = iam.get_account_summary()
+    mfa_enabled = summary['SummaryMap'].get('AccountMFAEnabled', 0) == 1
+
+    mfa_type = 'none'
+    if mfa_enabled:
+        # Default to hardware; override to virtual only if we find a
+        # virtual MFA device assigned to the root ARN. Paginate because
+        # accounts may have many virtual MFA devices assigned to IAM users.
+        mfa_type = 'hardware'
+        vmfa_paginator = iam.get_paginator('list_virtual_mfa_devices')
+        # Early-exit pattern: break both loops once we know root is virtual.
+        found_root_virtual = False
+        for page in vmfa_paginator.paginate(AssignmentStatus='Assigned'):
+            for device in page['VirtualMFADevices']:
+                # .get() chains safely through nested dicts (PCC3e Ch. 6).
+                # Devices may lack a 'User' key if unassigned — though we
+                # filter to 'Assigned' above, the defensive pattern still
+                # protects against any schema surprises.
+                user_arn = device.get('User', {}).get('Arn', '')
+                if user_arn.endswith(':root'):
+                    mfa_type = 'virtual'
+                    found_root_virtual = True
+                    break
+            if found_root_virtual:
+                break
+
+    status = 'PASS' if mfa_enabled else 'FAIL'
+
+    # Prominent banner at the top of audit output per issue AC #2.
+    print("=" * 40)
+    print("Root Account:")
+    if mfa_enabled and mfa_type == 'hardware':
+        print("  [PASS] MFA enabled (hardware). FedRAMP High preferred.")
+    elif mfa_enabled and mfa_type == 'virtual':
+        print("  [PASS] MFA enabled (virtual). FedRAMP High recommends hardware MFA for root.")
+    else:
+        print("  [FAIL] MFA NOT enabled. Critical security gap.")
+    print("=" * 40)
+
+    return {
+        'root_mfa_enabled': mfa_enabled,
+        'root_mfa_type': mfa_type,
+        'root_mfa_status': status
+    }
 
 
 def audit_user(iam, user):
@@ -330,6 +435,13 @@ def run_audit():
     # Create IAM client to interact with AWS IAM service.
     iam = boto3.client('iam')
 
+    audit_start = datetime.now()
+
+    # Root account check runs first so the banner appears above the per-user
+    # output. Root is account-level (not per-user) so results are kept in a
+    # separate dict rather than mixed into audit_results.
+    root_info = audit_root_account(iam)
+
     # Paginate list_users() to retrieve all users regardless of account size.
     # Default API response is capped at 100 users per call.
     paginator = iam.get_paginator('list_users')
@@ -339,7 +451,6 @@ def run_audit():
     total_users = len(users)
 
     audit_results = []
-    audit_start = datetime.now()
 
     # Check each user for MFA, access key, and activity compliance.
     for user in users:
@@ -401,10 +512,13 @@ def run_audit():
         'compliance_rate': f"{compliance_rate:.1f}%",
         'key_compliance_rate': f"{key_compliance_rate:.1f}%",
         'activity_compliance_rate': f"{activity_compliance_rate:.1f}%",
-        'inactive_users': inactive_count
+        'inactive_users': inactive_count,
+        'root_mfa_enabled': root_info['root_mfa_enabled'],
+        'root_mfa_type': root_info['root_mfa_type'],
+        'root_mfa_status': root_info['root_mfa_status']
     }
 
-    csv_file = export_to_csv(audit_results, timestamp_str)
+    csv_file = export_to_csv(audit_results, root_info, timestamp_str)
     json_file = export_to_json(audit_results, metadata, timestamp_str)
 
     print(f"\nResults exported to:")
