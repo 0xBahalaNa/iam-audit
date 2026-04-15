@@ -19,13 +19,15 @@ Alerting:
     If IAM_AUDIT_SNS_TOPIC_ARN is set, a summary of non-compliant findings
     is published to the given SNS topic at the end of the audit run.
 Usage:
-    python iam_audit.py
+    python iam_audit.py [--output-dir PATH] [--format {csv,json,both}] [--quiet]
+    python iam_audit.py --help
 Requirements:
     - boto3 installed (pip install boto3)
     - AWS credentials configured (aws configure)
 """
 
 # Import associated AWS module for script.
+import argparse
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from datetime import datetime, timezone
@@ -34,7 +36,7 @@ import json
 import os
 
 
-def export_to_csv(audit_results, root_info, policy_info, timestamp):
+def export_to_csv(audit_results, root_info, policy_info, timestamp, output_dir='.'):
     """
     Export audit results to CSV file with timestamp in filename.
 
@@ -54,11 +56,16 @@ def export_to_csv(audit_results, root_info, policy_info, timestamp):
         policy_info: Dictionary from audit_password_policy() with password
                      policy configured flag, status, and per-check list
         timestamp: ISO 8601 timestamp string for filename
+        output_dir: Directory to write the CSV into (default: current dir).
+                    Created if missing. Idempotent via exist_ok=True.
 
     Returns:
-        filename: Name of the created CSV file
+        filename: Full path to the created CSV file
     """
-    filename = f"iam_audit_{timestamp}.csv"
+    # exist_ok=True makes the call idempotent: no error if the directory
+    # already exists, mkdir -p semantics for nested paths like "reports/2026".
+    os.makedirs(output_dir, exist_ok=True)
+    filename = os.path.join(output_dir, f"iam_audit_{timestamp}.csv")
 
     fieldnames = [
         'username', 'has_console_access', 'mfa_enabled', 'mfa_type',
@@ -138,7 +145,7 @@ def export_to_csv(audit_results, root_info, policy_info, timestamp):
     return filename
 
 
-def export_to_json(audit_results, metadata, timestamp):
+def export_to_json(audit_results, metadata, timestamp, output_dir='.'):
     """
     Export audit results to JSON file with metadata.
 
@@ -146,11 +153,14 @@ def export_to_json(audit_results, metadata, timestamp):
         audit_results: List of dictionaries containing user audit data
         metadata: Dictionary containing audit metadata (timestamps, counts, rates)
         timestamp: ISO 8601 timestamp string for filename
+        output_dir: Directory to write the JSON into (default: current dir).
+                    Created if missing.
 
     Returns:
-        filename: Name of the created JSON file
+        filename: Full path to the created JSON file
     """
-    filename = f"iam_audit_{timestamp}.json"
+    os.makedirs(output_dir, exist_ok=True)
+    filename = os.path.join(output_dir, f"iam_audit_{timestamp}.json")
 
     report = {
         'metadata': {
@@ -375,7 +385,7 @@ def audit_password_policy(iam):
     }
 
 
-def audit_user(iam, user):
+def audit_user(iam, user, quiet=False):
     """
     Audit a single IAM user for MFA, access key, and activity compliance.
 
@@ -387,6 +397,8 @@ def audit_user(iam, user):
         iam: boto3 IAM client
         user: User dictionary from list_users() containing UserName,
               CreateDate, and optionally PasswordLastUsed
+        quiet: When True, suppress per-user print output. Account-level
+               banners and the final summary still print from run_audit.
 
     Returns:
         dict containing user audit results with keys: username,
@@ -394,9 +406,14 @@ def audit_user(iam, user):
         access_key_count, oldest_key_age_days, key_compliance_status,
         last_activity_date, days_inactive, activity_status
     """
+    # Bind 'log' to print, or to a no-op lambda when quiet. Declaring this
+    # once lets the per-user lines below stay uncluttered — no 'if not quiet'
+    # scattered through the function.
+    log = print if not quiet else lambda *args, **kwargs: None
+
     username = user['UserName']
     now_utc = datetime.now(timezone.utc)
-    print(f"Checking: {username}")
+    log(f"Checking: {username}")
 
     # Paginate list_mfa_devices() for completeness. Empty list means no MFA.
     mfa_paginator = iam.get_paginator('list_mfa_devices')
@@ -413,13 +430,13 @@ def audit_user(iam, user):
 
     # Evaluate compliance based on both checks.
     if has_console and mfa_devices:
-        print("    [PASS] MFA enabled for console user.")
+        log("    [PASS] MFA enabled for console user.")
         compliance_status = 'PASS'
     elif has_console and not mfa_devices:
-        print("    [FAIL] Console access WITHOUT MFA!")
+        log("    [FAIL] Console access WITHOUT MFA!")
         compliance_status = 'FAIL'
     else:
-        print("    [INFO] No console access (MFA not required).")
+        log("    [INFO] No console access (MFA not required).")
         compliance_status = 'INFO'
 
     # Check access key age for compliance with rotation policy.
@@ -447,19 +464,19 @@ def audit_user(iam, user):
 
             # Only flag active keys — inactive keys are already disabled.
             if key_status == 'Active' and key_age_days > 90:
-                print(f"    [FAIL] Access key ...{key_id[-4:]} is {key_age_days} days old (Active)")
+                log(f"    [FAIL] Access key ...{key_id[-4:]} is {key_age_days} days old (Active)")
                 user_keys_compliant = False
             elif key_status == 'Active':
-                print(f"    [PASS] Access key ...{key_id[-4:]} is {key_age_days} days old (Active)")
+                log(f"    [PASS] Access key ...{key_id[-4:]} is {key_age_days} days old (Active)")
             else:
-                print(f"    [INFO] Access key ...{key_id[-4:]} is {key_age_days} days old (Inactive)")
+                log(f"    [INFO] Access key ...{key_id[-4:]} is {key_age_days} days old (Inactive)")
 
         if user_keys_compliant:
             key_compliance = 'PASS'
         else:
             key_compliance = 'FAIL'
     else:
-        print("    [N/A] No access keys.")
+        log("    [N/A] No access keys.")
 
     # Determine last activity date for inactivity detection.
     # AC-2(3) requires disabling accounts inactive beyond a defined threshold.
@@ -487,10 +504,10 @@ def audit_user(iam, user):
     days_inactive = (now_utc - last_activity).days
 
     if days_inactive > 90:
-        print(f"    [FAIL] Inactive for {days_inactive} days (last activity: {last_activity.strftime('%Y-%m-%d')})")
+        log(f"    [FAIL] Inactive for {days_inactive} days (last activity: {last_activity.strftime('%Y-%m-%d')})")
         activity_status = 'FAIL'
     else:
-        print(f"    [PASS] Active within 90 days (last activity: {last_activity.strftime('%Y-%m-%d')})")
+        log(f"    [PASS] Active within 90 days (last activity: {last_activity.strftime('%Y-%m-%d')})")
         activity_status = 'PASS'
 
     return {
@@ -604,12 +621,26 @@ def send_compliance_alert(audit_results, metadata):
     return response['MessageId']
 
 
-def run_audit():
+def run_audit(output_dir='.', output_format='both', quiet=False):
     """
     Run the full IAM audit across all users.
 
-    Creates an IAM client, checks every user for MFA and access key
-    compliance, prints a summary, and exports results to CSV and JSON.
+    Creates an IAM client, checks every user for MFA, access key, and
+    activity compliance, prints a summary, and exports results based on
+    the selected format.
+
+    Defaults preserve the pre-CLI behavior: both files in the current
+    directory, verbose per-user output. This keeps run_audit() callable
+    programmatically (e.g., from tests or future evidence-logger hooks)
+    without relying on argparse.
+
+    Args:
+        output_dir: Directory to write reports into. Created if missing.
+                    Defaults to current directory.
+        output_format: 'csv', 'json', or 'both' (default: 'both').
+        quiet: When True, per-user output is suppressed. Account-level
+               banners (root MFA, password policy) and the final
+               summary still print.
     """
     # Create IAM client to interact with AWS IAM service.
     iam = boto3.client('iam')
@@ -636,8 +667,10 @@ def run_audit():
     audit_results = []
 
     # Check each user for MFA, access key, and activity compliance.
+    # The quiet flag propagates to per-user output only; audit_user() still
+    # returns the same dict shape regardless.
     for user in users:
-        result = audit_user(iam, user)
+        result = audit_user(iam, user, quiet=quiet)
         audit_results.append(result)
 
     # Capture audit completion time and calculate elapsed time.
@@ -704,16 +737,91 @@ def run_audit():
         'password_policy_checks': policy_info['password_policy_checks']
     }
 
-    csv_file = export_to_csv(audit_results, root_info, policy_info, timestamp_str)
-    json_file = export_to_json(audit_results, metadata, timestamp_str)
+    # Gate each export on the selected format so --format csv/json skips the
+    # other writer entirely. 'both' runs both branches. Using 'in' keeps the
+    # conditional readable without repeating the two-branch comparison.
+    csv_file = None
+    json_file = None
+    if output_format in ('csv', 'both'):
+        csv_file = export_to_csv(
+            audit_results, root_info, policy_info, timestamp_str,
+            output_dir=output_dir,
+        )
+    if output_format in ('json', 'both'):
+        json_file = export_to_json(
+            audit_results, metadata, timestamp_str,
+            output_dir=output_dir,
+        )
 
     print(f"\nResults exported to:")
-    print(f"  - {csv_file}")
-    print(f"  - {json_file}")
+    if csv_file:
+        print(f"  - {csv_file}")
+    if json_file:
+        print(f"  - {json_file}")
 
     # Publish SNS alert if configured and non-compliant findings exist.
     send_compliance_alert(audit_results, metadata)
 
 
+def parse_args():
+    """
+    Parse command-line arguments for the IAM audit.
+
+    argparse builds the --help output automatically from the description
+    and each add_argument() call, so we don't define --help ourselves.
+    Hyphens in flag names become underscores on the Namespace, so
+    '--output-dir' is read as 'args.output_dir'. Reference:
+    https://docs.python.org/3/library/argparse.html
+
+    Returns:
+        argparse.Namespace with attributes: output_dir, format, quiet
+    """
+    parser = argparse.ArgumentParser(
+        description=(
+            'Audit the AWS root account and all IAM users for MFA, access '
+            'key rotation, activity, and password policy compliance. '
+            'Exports findings to CSV and/or JSON.'
+        ),
+    )
+    parser.add_argument(
+        '--output-dir',
+        default='.',
+        help='Directory to write CSV/JSON reports (default: current directory). Created if missing.',
+    )
+    # choices= enforces a whitelist at parse time — argparse rejects bad
+    # values with a helpful error before run_audit() is ever called.
+    parser.add_argument(
+        '--format',
+        choices=['csv', 'json', 'both'],
+        default='both',
+        help='Output format to write (default: both).',
+    )
+    # action='store_true' means the flag takes no value; presence sets True,
+    # absence leaves the default False. Standard argparse idiom for boolean
+    # toggles.
+    parser.add_argument(
+        '--quiet',
+        action='store_true',
+        help='Suppress per-user output; print only account-level banners and the summary.',
+    )
+    return parser.parse_args()
+
+
+def main():
+    """
+    CLI entry point. Parses arguments, then calls run_audit().
+
+    Keeping argparse concerns out of run_audit() means the audit logic
+    can still be invoked directly (e.g., from evidence-logger) without
+    going through the CLI.
+    """
+    args = parse_args()
+    run_audit(
+        output_dir=args.output_dir,
+        output_format=args.format,
+        quiet=args.quiet,
+    )
+
+
 if __name__ == '__main__':
-    run_audit()
+    main()
