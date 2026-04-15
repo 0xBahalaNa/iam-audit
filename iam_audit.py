@@ -4,6 +4,7 @@ Audits the AWS root account and all IAM users for MFA and access key compliance.
 Account-level checks:
     - Root account MFA status (enabled/disabled)
     - Root account MFA device type (hardware/virtual; FedRAMP High prefers hardware)
+    - Password policy compliance (length, complexity, rotation, reuse prevention)
 Per-user checks:
     1. Console Access - Does the user have a password to log into AWS Console?
     2. MFA Status - If they have console access, is MFA enabled?
@@ -33,17 +34,25 @@ import json
 import os
 
 
-def export_to_csv(audit_results, root_info, timestamp):
+def export_to_csv(audit_results, root_info, policy_info, timestamp):
     """
     Export audit results to CSV file with timestamp in filename.
 
-    The root account appears as the first row with username '<ROOT>' and
-    mfa_type populated ('hardware', 'virtual', or 'none'). IAM user rows
-    leave mfa_type blank — the field is account-level, not per-user.
+    Account-level findings appear as special rows before the per-user rows:
+        <ROOT>                    - Root MFA status with mfa_type populated
+        <POLICY_OVERALL>          - Aggregate pass/fail for the password policy
+        <POLICY_*>                - One row per individual policy check,
+                                    with 'details' field holding
+                                    "expected X, actual Y"
+
+    Per-user rows leave mfa_type and details blank since those fields are
+    account-level, not user-level.
 
     Args:
         audit_results: List of dictionaries containing user audit data
         root_info: Dictionary from audit_root_account() with root MFA details
+        policy_info: Dictionary from audit_password_policy() with password
+                     policy configured flag, status, and per-check list
         timestamp: ISO 8601 timestamp string for filename
 
     Returns:
@@ -55,7 +64,7 @@ def export_to_csv(audit_results, root_info, timestamp):
         'username', 'has_console_access', 'mfa_enabled', 'mfa_type',
         'compliance_status', 'access_key_count', 'oldest_key_age_days',
         'key_compliance_status', 'last_activity_date', 'days_inactive',
-        'activity_status'
+        'activity_status', 'details'
     ]
 
     # Root has no access keys tracked here, no concept of console-vs-
@@ -73,13 +82,57 @@ def export_to_csv(audit_results, root_info, timestamp):
         'key_compliance_status': 'N/A',
         'last_activity_date': '',
         'days_inactive': '',
-        'activity_status': 'N/A'
+        'activity_status': 'N/A',
+        'details': ''
     }
+
+    # Build password policy rows. Overall summary first, then one row per
+    # individual check so auditors can see which specific rules failed.
+    policy_rows = []
+    checks = policy_info['password_policy_checks']
+
+    if policy_info['password_policy_configured']:
+        passed = sum(1 for c in checks if c['status'] == 'PASS')
+        overall_details = f"{passed} of {len(checks)} checks passed"
+    else:
+        overall_details = 'No password policy configured on the account'
+
+    policy_rows.append({
+        'username': '<POLICY_OVERALL>',
+        'has_console_access': '',
+        'mfa_enabled': '',
+        'mfa_type': '',
+        'compliance_status': policy_info['password_policy_status'],
+        'access_key_count': '',
+        'oldest_key_age_days': '',
+        'key_compliance_status': 'N/A',
+        'last_activity_date': '',
+        'days_inactive': '',
+        'activity_status': 'N/A',
+        'details': overall_details
+    })
+
+    for c in checks:
+        policy_rows.append({
+            'username': f"<POLICY_{c['name']}>",
+            'has_console_access': '',
+            'mfa_enabled': '',
+            'mfa_type': '',
+            'compliance_status': c['status'],
+            'access_key_count': '',
+            'oldest_key_age_days': '',
+            'key_compliance_status': 'N/A',
+            'last_activity_date': '',
+            'days_inactive': '',
+            'activity_status': 'N/A',
+            'details': f"expected {c['expected']}, actual {c['actual']}"
+        })
 
     with open(filename, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerow(root_row)
+        writer.writerows(policy_rows)
         writer.writerows(audit_results)
 
     return filename
@@ -111,7 +164,12 @@ def export_to_json(audit_results, metadata, timestamp):
             'inactive_users': metadata['inactive_users'],
             'root_mfa_enabled': metadata['root_mfa_enabled'],
             'root_mfa_type': metadata['root_mfa_type'],
-            'root_mfa_status': metadata['root_mfa_status']
+            'root_mfa_status': metadata['root_mfa_status'],
+            'password_policy': {
+                'configured': metadata['password_policy_configured'],
+                'status': metadata['password_policy_status'],
+                'checks': metadata['password_policy_checks']
+            }
         },
         'findings': audit_results
     }
@@ -193,6 +251,127 @@ def audit_root_account(iam):
         'root_mfa_enabled': mfa_enabled,
         'root_mfa_type': mfa_type,
         'root_mfa_status': status
+    }
+
+
+def audit_password_policy(iam):
+    """
+    Audit the account's IAM password policy against FedRAMP High requirements.
+
+    FedRAMP High IA-5(1) parameterizes NIST 800-53 Rev 5 password requirements.
+    CJIS v6.0 5.6.2.1 aligns with these same parameters as of December 2024.
+    This function evaluates seven checks and returns overall status plus
+    per-check detail so auditors can see expected vs actual for each rule.
+
+    If no password policy is configured on the account,
+    get_account_password_policy() raises NoSuchEntityException. Absence of a
+    policy is itself a compliance failure, so we catch the exception and
+    return a structured failure record rather than letting it crash the
+    audit.
+
+    Args:
+        iam: boto3 IAM client
+
+    Returns:
+        dict with keys:
+            password_policy_configured (bool): False if no policy exists
+            password_policy_status (str): 'PASS' or 'FAIL' overall
+            password_policy_checks (list[dict]): per-check records with
+                keys name, expected, actual, status
+    """
+    print("=" * 40)
+    print("Password Policy:")
+
+    try:
+        response = iam.get_account_password_policy()
+        policy = response['PasswordPolicy']
+    except iam.exceptions.NoSuchEntityException:
+        # No policy on the account. Structured FAIL so downstream exports
+        # can render it consistently with configured-but-failing policies.
+        print("  [FAIL] No password policy configured on the account.")
+        print("=" * 40)
+        return {
+            'password_policy_configured': False,
+            'password_policy_status': 'FAIL',
+            'password_policy_checks': []
+        }
+
+    # dict.get() with sensible defaults (PCC3e Ch. 6). MaxPasswordAge may
+    # be absent when ExpirePasswords is False; PasswordReusePrevention may
+    # be absent when set to 0. In both cases the defaults make the check
+    # fail, which is the correct compliance outcome.
+    min_len = policy.get('MinimumPasswordLength', 0)
+    require_upper = policy.get('RequireUppercaseCharacters', False)
+    require_lower = policy.get('RequireLowercaseCharacters', False)
+    require_numbers = policy.get('RequireNumbers', False)
+    require_symbols = policy.get('RequireSymbols', False)
+    max_age = policy.get('MaxPasswordAge', 0)
+    reuse_prevention = policy.get('PasswordReusePrevention', 0)
+
+    # Declarative check list: each element is name, expected-as-string,
+    # actual value, and pass/fail. Separating the check data from the
+    # evaluation loop keeps the thresholds visible at a glance and makes
+    # it easy to add, remove, or tune checks without rewriting control flow.
+    checks = [
+        {
+            'name': 'MinimumPasswordLength',
+            'expected': '>= 14',
+            'actual': min_len,
+            'status': 'PASS' if min_len >= 14 else 'FAIL'
+        },
+        {
+            'name': 'RequireUppercaseCharacters',
+            'expected': True,
+            'actual': require_upper,
+            'status': 'PASS' if require_upper else 'FAIL'
+        },
+        {
+            'name': 'RequireLowercaseCharacters',
+            'expected': True,
+            'actual': require_lower,
+            'status': 'PASS' if require_lower else 'FAIL'
+        },
+        {
+            'name': 'RequireNumbers',
+            'expected': True,
+            'actual': require_numbers,
+            'status': 'PASS' if require_numbers else 'FAIL'
+        },
+        {
+            'name': 'RequireSymbols',
+            'expected': True,
+            'actual': require_symbols,
+            'status': 'PASS' if require_symbols else 'FAIL'
+        },
+        {
+            'name': 'MaxPasswordAge',
+            'expected': '<= 60 days (and set)',
+            'actual': max_age,
+            # Both conditions must hold: expiry must be configured (max_age > 0
+            # since 0 means "never expire") AND within the FedRAMP window.
+            'status': 'PASS' if 0 < max_age <= 60 else 'FAIL'
+        },
+        {
+            'name': 'PasswordReusePrevention',
+            'expected': '>= 24',
+            'actual': reuse_prevention,
+            'status': 'PASS' if reuse_prevention >= 24 else 'FAIL'
+        },
+    ]
+
+    passed = sum(1 for c in checks if c['status'] == 'PASS')
+    overall = 'PASS' if passed == len(checks) else 'FAIL'
+
+    # Print each check result, then an overall summary line.
+    for c in checks:
+        print(f"  [{c['status']}] {c['name']}: expected {c['expected']}, actual {c['actual']}")
+    print(f"  Overall: {overall} ({passed} of {len(checks)} checks passed)")
+    print("=" * 40)
+
+    return {
+        'password_policy_configured': True,
+        'password_policy_status': overall,
+        'password_policy_checks': checks
     }
 
 
@@ -442,6 +621,10 @@ def run_audit():
     # separate dict rather than mixed into audit_results.
     root_info = audit_root_account(iam)
 
+    # Password policy check is also account-level. Runs after root so the
+    # two account-level banners print together before per-user output.
+    policy_info = audit_password_policy(iam)
+
     # Paginate list_users() to retrieve all users regardless of account size.
     # Default API response is capped at 100 users per call.
     paginator = iam.get_paginator('list_users')
@@ -515,10 +698,13 @@ def run_audit():
         'inactive_users': inactive_count,
         'root_mfa_enabled': root_info['root_mfa_enabled'],
         'root_mfa_type': root_info['root_mfa_type'],
-        'root_mfa_status': root_info['root_mfa_status']
+        'root_mfa_status': root_info['root_mfa_status'],
+        'password_policy_configured': policy_info['password_policy_configured'],
+        'password_policy_status': policy_info['password_policy_status'],
+        'password_policy_checks': policy_info['password_policy_checks']
     }
 
-    csv_file = export_to_csv(audit_results, root_info, timestamp_str)
+    csv_file = export_to_csv(audit_results, root_info, policy_info, timestamp_str)
     json_file = export_to_json(audit_results, metadata, timestamp_str)
 
     print(f"\nResults exported to:")
