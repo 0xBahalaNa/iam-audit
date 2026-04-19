@@ -187,28 +187,49 @@ The IAM identity running the script needs `sns:Publish` on the topic.
 
 ## GRC Application
 
-This tool supports compliance and audit requirements:
+This tool targets the **NIST 800-53 Rev 5**, **FedRAMP High**, and **CJIS Security Policy v6.0** catalogs — the primary frameworks for U.S. public sector cloud workloads. CJIS v6.0 adopts NIST 800-53 Rev 5 directly as of April 1, 2026, so control identifiers match across all three columns; the CJIS column notes the Policy Area for assessor cross-reference.
 
-### Security Controls
-- **CIS AWS Benchmark** — 1.10 (MFA enabled for all IAM users with console password)
-- **SOC 2** — CC6.1 (Logical Access Controls)
-- **NIST 800-53** — IA-2 (Multi-Factor Authentication)
+### Control Mapping
 
-### Audit Trail & Evidence
-- **SOC 2** — CC6.1 (Audit trail with timestamps for control testing)
-- **NIST 800-53** — AU-12 (Audit generation with timestamps and user identification)
-- **ISO 27001** — A.12.4.1 (Event logging with timestamps)
+| Audit Check | NIST 800-53 Rev 5 | FedRAMP High | CJIS v6.0 |
+|-------------|-------------------|--------------|-----------|
+| Root account MFA + hardware token detection | IA-2(1), IA-2(6) | IA-2(1), IA-2(6) | IA-2(1), IA-2(6) — Policy Area 6 |
+| IAM user MFA (console access) | IA-2(1), IA-2(2) | IA-2(1), IA-2(2) | IA-2(1), IA-2(2) — Policy Area 6 |
+| Access key rotation (90-day) | IA-5(1), AC-2(1) | IA-5(1), AC-2(1) | IA-5(1), AC-2(1) — Policy Areas 5, 6 |
+| User inactivity detection | AC-2(3), AC-2(4) | AC-2(3), AC-2(4) | AC-2(3) — Policy Area 5 |
+| Password policy compliance | IA-5(1) | IA-5(1) | IA-5(1) — Policy Area 6 |
+| SNS alerting for non-compliant findings | SI-5, IR-6 | SI-5 | SI-5 — Policy Area 3 |
+| CSV/JSON timestamped evidence export | AU-12, AU-6, CA-7 | AU-12, AU-6, CA-7 | AU-12, AU-6 — Policy Area 4 |
 
-### Compliance Reporting
-- **CSV exports** for auditor review and compliance officer reporting
-- **JSON exports** for SIEM integration and automated compliance dashboards
-- **Compliance rate metrics** for executive and board reporting
-- **Timestamped filenames** for evidence preservation and historical tracking
+### Audit Relevance
+
+**Root account MFA verification** — Produces direct evidence for the IA-2(1) assessment objective (MFA to privileged accounts). Hardware-token detection satisfies IA-2(6) where a separate physical device is required. Evidence fields: `root_mfa_enabled`, `root_mfa_type` in the CSV/JSON output.
+
+**IAM user MFA audit** — Records where `has_console_access=true` + `mfa_enabled=false` are direct IA-2(1)/(2) control failures. Assessors can filter the CSV output for these rows as deficiency findings without re-running the audit.
+
+**Access key rotation** — Flags keys older than 90 days against IA-5(1) authenticator lifetime parameters. Combined with AC-2(1) automated account management, this demonstrates continuous detection of stale credentials rather than a point-in-time snapshot.
+
+**User inactivity detection** — Credentials unused beyond the configured window flag for AC-2(3). FedRAMP High parameterizes AC-2(3) at 35 days for non-user accounts; the tool's per-user `days_since_activity` field lets auditors re-filter to that stricter window from the same output file.
+
+**Password policy compliance** — Reads the account password policy and maps each setting (minimum length, complexity, reuse prevention, max age) to the IA-5(1) assessment objectives. A missing policy is documented as a finding rather than silently skipped.
+
+**SNS alerting** — Satisfies the "disseminate" side of SI-5 (security alerts). Subscribers receive non-compliant findings within seconds of an audit run, closing the loop on AU-6 audit record review.
+
+**Timestamped evidence output** — CSV/JSON files with ISO 8601 filenames (`iam_audit_YYYY-MM-DDTHH-MM-SS.{csv,json}`) provide the audit records (AU-12) and the structured review surface (AU-6). Paired with a scheduled run cadence, the same outputs feed CA-7 continuous monitoring.
+
+### FedRAMP 20x Alignment
+
+FedRAMP 20x shifts evidence collection from point-in-time documents to continuous, machine-readable signals — Key Security Indicators (KSIs). This tool is positioned as a KSI evidence producer for IAM:
+
+- **Privileged access MFA** — root + IAM user MFA state rolled up to a single compliance rate per audit run.
+- **Authenticator lifetime** — percentage of access keys under the 90-day rotation threshold.
+- **Account hygiene** — count of users with credentials unused beyond the inactivity window.
+
+The JSON output is the stable machine interface; downstream consumers (`evidence-logger`, OSCAL assemblers) can ingest findings without parsing console text. The `metadata` block (audit timestamps, `total_users`, `compliance_rate`) maps directly to OSCAL Assessment Results observation records.
 
 ## Future Enhancements
 
-- Root account MFA verification
-- Password policy compliance checks
+- Access review workflow module — certification and approval workflows for quarterly user access reviews (AC-2(1), AC-2(3))
 
 ## Framework Reference
 
