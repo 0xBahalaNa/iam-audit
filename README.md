@@ -103,7 +103,7 @@ lambda-role-user,False,False,INFO
 
 ## Alerting
 
-When the `IAM_AUDIT_SNS_TOPIC_ARN` environment variable is set, the audit publishes a summary of non-compliant findings to the given SNS topic at the end of each run. Maps to NIST 800-53 **SI-5** (Security Alerts, Advisories, and Directives).
+When the `IAM_AUDIT_SNS_TOPIC_ARN` environment variable is set, the audit publishes a summary of non-compliant findings to the given SNS topic at the end of each run. Maps to NIST 800-53 **SI-4(5)** (System-Generated Alerts).
 
 Alerts cover all three compliance dimensions (MFA, access key rotation, user inactivity) in a single summary message per audit run. No alert is published when the environment variable is unset or when zero findings exist.
 
@@ -196,9 +196,9 @@ This tool targets the **NIST 800-53 Rev 5**, **FedRAMP High**, and **CJIS Securi
 | Root account MFA + hardware token detection | IA-2(1), IA-2(6) | IA-2(1), IA-2(6) | IA-2(1), IA-2(6) — Policy Area 6 |
 | IAM user MFA (console access) | IA-2(1), IA-2(2) | IA-2(1), IA-2(2) | IA-2(1), IA-2(2) — Policy Area 6 |
 | Access key rotation (90-day) | IA-5(1), AC-2(1) | IA-5(1), AC-2(1) | IA-5(1), AC-2(1) — Policy Areas 5, 6 |
-| User inactivity detection | AC-2(3), AC-2(4) | AC-2(3), AC-2(4) | AC-2(3) — Policy Area 5 |
+| User inactivity detection | AC-2(3), AC-2(12) | AC-2(3), AC-2(12) | AC-2(3) — Policy Area 5 |
 | Password policy compliance | IA-5(1) | IA-5(1) | IA-5(1) — Policy Area 6 |
-| SNS alerting for non-compliant findings | SI-5, IR-6 | SI-5 | SI-5 — Policy Area 3 |
+| SNS alerting for non-compliant findings | SI-4(5), AU-6(1) | SI-4(5), AU-6(1) | SI-4(5) — Policy Area 12 |
 | CSV/JSON timestamped evidence export | AU-12, AU-6, CA-7 | AU-12, AU-6, CA-7 | AU-12, AU-6 — Policy Area 4 |
 
 ### Audit Relevance
@@ -209,11 +209,11 @@ This tool targets the **NIST 800-53 Rev 5**, **FedRAMP High**, and **CJIS Securi
 
 **Access key rotation** — Flags keys older than 90 days against IA-5(1) authenticator lifetime parameters. Combined with AC-2(1) automated account management, this demonstrates continuous detection of stale credentials rather than a point-in-time snapshot.
 
-**User inactivity detection** — Credentials unused beyond the configured window flag for AC-2(3). FedRAMP High parameterizes AC-2(3) at 35 days for non-user accounts; the tool's per-user `days_since_activity` field lets auditors re-filter to that stricter window from the same output file.
+**User inactivity detection** — Credentials unused beyond the configured window are the canonical "atypical usage" pattern under AC-2(12), which requires monitoring accounts for atypical usage and reporting it to defined personnel. The tool's per-user `days_since_activity` field also supports the AC-2(3) inactive-account parameter; FedRAMP High sets AC-2(3) at 35 days for non-user accounts, and auditors can re-filter the same output to that stricter threshold without re-running the audit.
 
 **Password policy compliance** — Reads the account password policy and maps each setting (minimum length, complexity, reuse prevention, max age) to the IA-5(1) assessment objectives. A missing policy is documented as a finding rather than silently skipped.
 
-**SNS alerting** — Satisfies the "disseminate" side of SI-5 (security alerts). Subscribers receive non-compliant findings within seconds of an audit run, closing the loop on AU-6 audit record review.
+**SNS alerting** — Maps directly to SI-4(5), which requires alerting designated personnel when system-generated indications of compromise occur. The audit's non-compliant findings (missing MFA, stale access keys, inactive users) are exactly that class of system-generated alert. Automating the review-to-alert path also supports AU-6(1) (automated integration of audit record review, analysis, and reporting), closing the loop from audit run to operator notification without manual handoff.
 
 **Timestamped evidence output** — CSV/JSON files with ISO 8601 filenames (`iam_audit_YYYY-MM-DDTHH-MM-SS.{csv,json}`) provide the audit records (AU-12) and the structured review surface (AU-6). Paired with a scheduled run cadence, the same outputs feed CA-7 continuous monitoring.
 

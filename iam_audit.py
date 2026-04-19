@@ -531,8 +531,8 @@ def send_compliance_alert(audit_results, metadata):
     Reads the SNS topic ARN from the IAM_AUDIT_SNS_TOPIC_ARN environment
     variable. If unset, alerting is skipped so the audit remains runnable
     without any SNS configuration. If set but no findings exist, the alert
-    is also skipped to avoid zero-finding noise. Maps to SI-5 (Security
-    Alerts, Advisories, and Directives).
+    is also skipped to avoid zero-finding noise. Maps to SI-4(5)
+    (System-Generated Alerts).
 
     Args:
         audit_results: List of dictionaries from audit_user() calls
