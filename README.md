@@ -227,9 +227,16 @@ FedRAMP 20x shifts evidence collection from point-in-time documents to continuou
 
 The JSON output is the stable machine interface; downstream consumers (`evidence-logger`, OSCAL assemblers) can ingest findings without parsing console text. The `metadata` block (audit timestamps, `total_users`, `compliance_rate`) maps directly to OSCAL Assessment Results observation records.
 
-## Future Enhancements
+## Roadmap
 
-- Access review workflow module — certification and approval workflows for quarterly user access reviews (AC-2(1), AC-2(3))
+The access-review workflow originally floated as a Future Enhancement has been spun out as a standalone v1.0 milestone in [`iam-access-review`](https://github.com/0xBahalaNa/iam-access-review) (Month 5, July 2026).
+
+v2.0 scope for **this** repo is **under review with a decision target of 2026-06-30**. Two paths:
+
+- **Active path:** lock a v2.0 scope (candidate enhancements: access-key rotation analytics, service-account audit, cross-account roll-up) and resume sprint cadence.
+- **Maintenance path:** formally mark v1.1 complete, community PRs reviewed on best-effort basis; IAM evidence work continues in [`iam-access-review`](https://github.com/0xBahalaNa/iam-access-review) and the broader IAM evidence layer of [`oscal-evidence-pipeline`](https://github.com/0xBahalaNa/oscal-evidence-pipeline) without expanding this tool.
+
+The JSON output already supports downstream consumption by `oscal-evidence-pipeline` as a Component Definition source — neither path changes that integration surface.
 
 ## Framework Reference
 
