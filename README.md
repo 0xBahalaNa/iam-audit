@@ -1,3 +1,10 @@
+![License](https://img.shields.io/badge/License-MIT-green?style=flat)
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776ab?style=flat)
+![AWS](https://img.shields.io/badge/AWS-IAM-FF9900?style=flat&logo=amazonwebservices)
+![NIST 800-53](https://img.shields.io/badge/NIST-800--53%20Rev%205-004990?style=flat)
+![FedRAMP](https://img.shields.io/badge/FedRAMP-High%20Baseline-0071bc?style=flat)
+![CJIS](https://img.shields.io/badge/CJIS-Security%20Policy%20v6.0-cc0000?style=flat)
+
 # IAM Audit
 
 A Python tool that audits all IAM users in your AWS account for MFA compliance.
