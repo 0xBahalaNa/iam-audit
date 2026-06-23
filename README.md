@@ -194,7 +194,7 @@ The IAM identity running the script needs `sns:Publish` on the topic.
 
 ## GRC Application
 
-This tool targets the **NIST 800-53 Rev 5**, **FedRAMP High**, and **CJIS Security Policy v6.0** catalogs — the primary frameworks for U.S. public sector cloud workloads. CJIS v6.0 adopts NIST 800-53 Rev 5 directly as of April 1, 2026, so control identifiers match across all three columns; the CJIS column notes the Policy Area for assessor cross-reference.
+This tool targets the **NIST 800-53 Rev 5**, **FedRAMP High**, and **CJIS Security Policy v6.0** catalogs — the primary frameworks for U.S. public sector cloud workloads. CJIS v6.0 (published Dec 27, 2024) adopts NIST 800-53 Rev 5 directly—the default audit baseline from April 1, 2026—so control identifiers match across all three columns; the CJIS column notes the Policy Area for assessor cross-reference.
 
 ### Control Mapping
 
