@@ -1,0 +1,26 @@
+%% Editable Mermaid source for the README "Architecture Overview" section.
+%% Keep this file in sync with the inline ```mermaid fence in README.md.
+%% Diff-able source of truth for the architecture graph (no separate PNG export).
+flowchart TD
+    CLI["iam_audit.py<br/>CLI entry"] --> IAM["boto3 IAM client"]
+    IAM --> ACC["Account-level checks"]
+    ACC --> ROOT["Root MFA<br/>enabled + device type"]
+    ACC --> POL["Password policy<br/>length · complexity · reuse · max age"]
+    IAM --> USERS["list_users<br/>paginated"]
+    USERS --> PER["Per-user checks"]
+    PER --> MFA["Console access + MFA"]
+    PER --> KEY["Access key age<br/>90-day rotation"]
+    PER --> ACT["User inactivity<br/>90-day threshold"]
+    ROOT --> EXP["Timestamped evidence"]
+    POL --> EXP
+    MFA --> EXP
+    KEY --> EXP
+    ACT --> EXP
+    EXP --> CSV["CSV export<br/>auditor review"]
+    EXP --> JSON["JSON export<br/>machine-readable"]
+    MFA --> SNS["SNS alert optional<br/>IAM_AUDIT_SNS_TOPIC_ARN"]
+    KEY --> SNS
+    ACT --> SNS
+    CSV --> HUM["Auditors / spreadsheets"]
+    JSON --> PIPE["evidence-logger · OSCAL<br/>oscal-evidence-pipeline"]
+    SNS --> OPS["Operators<br/>email / SMS"]
