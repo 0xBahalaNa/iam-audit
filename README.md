@@ -15,6 +15,40 @@ This script checks each IAM user to determine:
 1. **Console Access** — Does the user have a password to log into AWS Console?
 2. **MFA Status** — If they have console access, is MFA enabled?
 
+It also audits account-level root MFA and password policy, per-user access-key rotation and inactivity, then exports timestamped CSV/JSON evidence (optional SNS alert when configured).
+
+## Architecture Overview
+
+```mermaid
+flowchart TD
+    CLI["iam_audit.py<br/>CLI entry"] --> IAM["boto3 IAM client"]
+    IAM --> ACC["Account-level checks"]
+    ACC --> ROOT["Root MFA<br/>enabled + device type"]
+    ACC --> POL["Password policy<br/>length · complexity · reuse · max age"]
+    IAM --> USERS["list_users<br/>paginated"]
+    USERS --> PER["Per-user checks"]
+    PER --> MFA["Console access + MFA"]
+    PER --> KEY["Access key age<br/>90-day rotation"]
+    PER --> ACT["User inactivity<br/>90-day threshold"]
+    ROOT --> EXP["Timestamped evidence"]
+    POL --> EXP
+    MFA --> EXP
+    KEY --> EXP
+    ACT --> EXP
+    EXP --> CSV["CSV export<br/>auditor review"]
+    EXP --> JSON["JSON export<br/>machine-readable"]
+    MFA --> SNS["SNS alert optional<br/>IAM_AUDIT_SNS_TOPIC_ARN"]
+    KEY --> SNS
+    ACT --> SNS
+    CSV --> HUM["Auditors / spreadsheets"]
+    JSON --> PIPE["evidence-logger · OSCAL<br/>oscal-evidence-pipeline"]
+    SNS --> OPS["Operators<br/>email / SMS"]
+```
+
+Editable Mermaid source (kept in sync with the fence above): [`docs/architecture.mmd`](docs/architecture.mmd).
+
+`run_audit()` walks account-level checks first (root MFA, password policy), then every IAM user for console/MFA hygiene, 90-day access-key age, and 90-day inactivity. Findings land in timestamped CSV/JSON for assessors and downstream automation; when `IAM_AUDIT_SNS_TOPIC_ARN` is set and non-compliant findings exist, a single SNS summary covers MFA, key, and activity failures (SI-4(5)).
+
 ## Requirements
 
 - Python 3.x
