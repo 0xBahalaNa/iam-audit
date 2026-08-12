@@ -12,8 +12,8 @@ A Python tool that audits all IAM users in your AWS account for MFA compliance.
 ## Overview
 
 This script checks each IAM user to determine:
-1. **Console Access** — Does the user have a password to log into AWS Console?
-2. **MFA Status** — If they have console access, is MFA enabled?
+1. **Console Access.** Does the user have a password to log into AWS Console?
+2. **MFA Status.** If they have console access, is MFA enabled?
 
 It also audits account-level root MFA and password policy, per-user access-key rotation and inactivity, then exports timestamped CSV/JSON evidence (optional SNS alert when configured).
 
@@ -97,7 +97,7 @@ Results exported to:
 |--------|---------|
 | `[PASS]` | Console user with MFA enabled |
 | `[FAIL]` | Console user WITHOUT MFA |
-| `[INFO]` | No console access (programmatic only) ℹ|
+| `[INFO]` | No console access (programmatic only) |
 
 ## Export Formats
 
@@ -228,43 +228,43 @@ The IAM identity running the script needs `sns:Publish` on the topic.
 
 ## GRC Application
 
-This tool targets the **NIST 800-53 Rev 5**, **FedRAMP High**, and **CJIS Security Policy v6.0** catalogs — the primary frameworks for U.S. public sector cloud workloads. CJIS v6.0 (published Dec 27, 2024) adopts NIST 800-53 Rev 5 directly—the default audit baseline from April 1, 2026—so control identifiers match across all three columns; the CJIS column notes the Policy Area for assessor cross-reference.
+This tool targets the **NIST 800-53 Rev 5**, **FedRAMP High**, and **CJIS Security Policy v6.0** catalogs, the primary frameworks for U.S. public sector cloud workloads. CJIS v6.0 (published Dec 27, 2024) adopts NIST 800-53 Rev 5 directly as the default audit baseline from April 1, 2026, so control identifiers match across all three columns; the CJIS column notes the Policy Area for assessor cross-reference.
 
 ### Control Mapping
 
 | Audit Check | NIST 800-53 Rev 5 | FedRAMP High | CJIS v6.0 |
 |-------------|-------------------|--------------|-----------|
-| Root account MFA + hardware token detection | IA-2(1), IA-2(6) | IA-2(1), IA-2(6) | IA-2(1), IA-2(6) — Policy Area 6 |
-| IAM user MFA (console access) | IA-2(1), IA-2(2) | IA-2(1), IA-2(2) | IA-2(1), IA-2(2) — Policy Area 6 |
-| Access key rotation (90-day) | IA-5(1), AC-2(1) | IA-5(1), AC-2(1) | IA-5(1), AC-2(1) — Policy Areas 5, 6 |
-| User inactivity detection | AC-2(3), AC-2(12) | AC-2(3), AC-2(12) | AC-2(3) — Policy Area 5 |
-| Password policy compliance | IA-5(1) | IA-5(1) | IA-5(1) — Policy Area 6 |
-| SNS alerting for non-compliant findings | SI-4(5), AU-6(1) | SI-4(5), AU-6(1) | SI-4(5) — Policy Area 12 |
-| CSV/JSON timestamped evidence export | AU-12, AU-6, CA-7 | AU-12, AU-6, CA-7 | AU-12, AU-6 — Policy Area 4 |
+| Root account MFA + hardware token detection | IA-2(1), IA-2(6) | IA-2(1), IA-2(6) | IA-2(1), IA-2(6) (Policy Area 6) |
+| IAM user MFA (console access) | IA-2(1), IA-2(2) | IA-2(1), IA-2(2) | IA-2(1), IA-2(2) (Policy Area 6) |
+| Access key rotation (90-day) | IA-5(1), AC-2(1) | IA-5(1), AC-2(1) | IA-5(1), AC-2(1) (Policy Areas 5, 6) |
+| User inactivity detection | AC-2(3), AC-2(12) | AC-2(3), AC-2(12) | AC-2(3) (Policy Area 5) |
+| Password policy compliance | IA-5(1) | IA-5(1) | IA-5(1) (Policy Area 6) |
+| SNS alerting for non-compliant findings | SI-4(5), AU-6(1) | SI-4(5), AU-6(1) | SI-4(5) (Policy Area 12) |
+| CSV/JSON timestamped evidence export | AU-12, AU-6, CA-7 | AU-12, AU-6, CA-7 | AU-12, AU-6 (Policy Area 4) |
 
 ### Audit Relevance
 
-**Root account MFA verification** — Produces direct evidence for the IA-2(1) assessment objective (MFA to privileged accounts). Hardware-token detection satisfies IA-2(6) where a separate physical device is required. Evidence fields: `root_mfa_enabled`, `root_mfa_type` in the CSV/JSON output.
+**Root account MFA verification.** Produces direct evidence for the IA-2(1) assessment objective (MFA to privileged accounts). Hardware-token detection satisfies IA-2(6) where a separate physical device is required. Evidence fields: `root_mfa_enabled`, `root_mfa_type` in the CSV/JSON output.
 
-**IAM user MFA audit** — Records where `has_console_access=true` + `mfa_enabled=false` are direct IA-2(1)/(2) control failures. Assessors can filter the CSV output for these rows as deficiency findings without re-running the audit.
+**IAM user MFA audit.** Records where `has_console_access=true` + `mfa_enabled=false` are direct IA-2(1)/(2) control failures. Assessors can filter the CSV output for these rows as deficiency findings without re-running the audit.
 
-**Access key rotation** — Flags keys older than 90 days against IA-5(1) authenticator lifetime parameters. Combined with AC-2(1) automated account management, this demonstrates continuous detection of stale credentials rather than a point-in-time snapshot.
+**Access key rotation.** Flags keys older than 90 days against IA-5(1) authenticator lifetime parameters. Combined with AC-2(1) automated account management, this demonstrates continuous detection of stale credentials rather than a point-in-time snapshot.
 
-**User inactivity detection** — Credentials unused beyond the configured window are the canonical "atypical usage" pattern under AC-2(12), which requires monitoring accounts for atypical usage and reporting it to defined personnel. The tool's per-user `days_since_activity` field also supports the AC-2(3) inactive-account parameter; FedRAMP High sets AC-2(3) at 35 days for non-user accounts, and auditors can re-filter the same output to that stricter threshold without re-running the audit.
+**User inactivity detection.** Credentials unused beyond the configured window are the canonical "atypical usage" pattern under AC-2(12), which requires monitoring accounts for atypical usage and reporting it to defined personnel. The tool's per-user `days_since_activity` field also supports the AC-2(3) inactive-account parameter; FedRAMP High sets AC-2(3) at 35 days for non-user accounts, and auditors can re-filter the same output to that stricter threshold without re-running the audit.
 
-**Password policy compliance** — Reads the account password policy and maps each setting (minimum length, complexity, reuse prevention, max age) to the IA-5(1) assessment objectives. A missing policy is documented as a finding rather than silently skipped.
+**Password policy compliance.** Reads the account password policy and maps each setting (minimum length, complexity, reuse prevention, max age) to the IA-5(1) assessment objectives. A missing policy is documented as a finding rather than silently skipped.
 
-**SNS alerting** — Maps directly to SI-4(5), which requires alerting designated personnel when system-generated indications of compromise occur. The audit's non-compliant findings (missing MFA, stale access keys, inactive users) are exactly that class of system-generated alert. Automating the review-to-alert path also supports AU-6(1) (automated integration of audit record review, analysis, and reporting), closing the loop from audit run to operator notification without manual handoff.
+**SNS alerting.** Maps directly to SI-4(5), which requires alerting designated personnel when system-generated indications of compromise occur. The audit's non-compliant findings (missing MFA, stale access keys, inactive users) are exactly that class of system-generated alert. Automating the review-to-alert path also supports AU-6(1) (automated integration of audit record review, analysis, and reporting), closing the loop from audit run to operator notification without manual handoff.
 
-**Timestamped evidence output** — CSV/JSON files with ISO 8601 filenames (`iam_audit_YYYY-MM-DDTHH-MM-SS.{csv,json}`) provide the audit records (AU-12) and the structured review surface (AU-6). Paired with a scheduled run cadence, the same outputs feed CA-7 continuous monitoring.
+**Timestamped evidence output.** CSV/JSON files with ISO 8601 filenames (`iam_audit_YYYY-MM-DDTHH-MM-SS.{csv,json}`) provide the audit records (AU-12) and the structured review surface (AU-6). Paired with a scheduled run cadence, the same outputs feed CA-7 continuous monitoring.
 
 ### FedRAMP 20x Alignment
 
-FedRAMP 20x shifts evidence collection from point-in-time documents to continuous, machine-readable signals — Key Security Indicators (KSIs). This tool is positioned as a KSI evidence producer for IAM:
+FedRAMP 20x shifts evidence collection from point-in-time documents to continuous, machine-readable signals called Key Security Indicators (KSIs). This tool is positioned as a KSI evidence producer for IAM:
 
-- **Privileged access MFA** — root + IAM user MFA state rolled up to a single compliance rate per audit run.
-- **Authenticator lifetime** — percentage of access keys under the 90-day rotation threshold.
-- **Account hygiene** — count of users with credentials unused beyond the inactivity window.
+- **Privileged access MFA.** Root and IAM user MFA state rolled up to a single compliance rate per audit run.
+- **Authenticator lifetime.** Percentage of access keys under the 90-day rotation threshold.
+- **Account hygiene.** Count of users with credentials unused beyond the inactivity window.
 
 The JSON output is the stable machine interface; downstream consumers (`evidence-logger`, OSCAL assemblers) can ingest findings without parsing console text. The `metadata` block (audit timestamps, `total_users`, `compliance_rate`) maps directly to OSCAL Assessment Results observation records.
 
@@ -277,7 +277,7 @@ v2.0 scope for **this** repo is **under review with a decision target of 2026-06
 - **Active path:** lock a v2.0 scope (candidate enhancements: access-key rotation analytics, service-account audit, cross-account roll-up) and resume sprint cadence.
 - **Maintenance path:** formally mark v1.1 complete, community PRs reviewed on best-effort basis; IAM evidence work continues in [`iam-access-review`](https://github.com/0xBahalaNa/iam-access-review) and the broader IAM evidence layer of [`oscal-evidence-pipeline`](https://github.com/0xBahalaNa/oscal-evidence-pipeline) without expanding this tool.
 
-The JSON output already supports downstream consumption by `oscal-evidence-pipeline` as a Component Definition source — neither path changes that integration surface.
+The JSON output already supports downstream consumption by `oscal-evidence-pipeline` as a Component Definition source. Neither path changes that integration surface.
 
 ## Framework Reference
 
