@@ -3,7 +3,7 @@
 ![AWS](https://img.shields.io/badge/AWS-IAM-FF9900?style=flat&logo=amazonwebservices)
 ![NIST 800-53](https://img.shields.io/badge/NIST-800--53%20Rev%205-004990?style=flat)
 ![FedRAMP](https://img.shields.io/badge/FedRAMP-High%20Baseline-0071bc?style=flat)
-![CJIS](https://img.shields.io/badge/CJIS-Security%20Policy%20v6.0-cc0000?style=flat)
+![CJIS](https://img.shields.io/badge/CJIS-Security%20Policy%20v6.1-cc0000?style=flat)
 
 # IAM Audit
 
@@ -228,19 +228,19 @@ The IAM identity running the script needs `sns:Publish` on the topic.
 
 ## GRC Application
 
-This tool targets the **NIST 800-53 Rev 5**, **FedRAMP High**, and **CJIS Security Policy v6.0** catalogs, the primary frameworks for U.S. public sector cloud workloads. CJIS v6.0 (published Dec 27, 2024) adopts NIST 800-53 Rev 5 directly as the default audit baseline from April 1, 2026, so control identifiers match across all three columns; the CJIS column notes the Policy Area for assessor cross-reference.
+This tool targets the **NIST 800-53 Rev 5**, **FedRAMP High**, and **CJIS Security Policy v6.1** catalogs, the primary frameworks for U.S. public sector cloud workloads. CJIS Security Policy v6.1 (released June 25, 2026) adopts NIST 800-53 Rev 5 directly — v6.x has been the default audit baseline since April 1, 2026 — so control identifiers match across all three columns; the CJIS column notes the v6.1 List of Priorities tier for assessor cross-reference.
 
 ### Control Mapping
 
-| Audit Check | NIST 800-53 Rev 5 | FedRAMP High | CJIS v6.0 |
+| Audit Check | NIST 800-53 Rev 5 | FedRAMP High | CJIS v6.1 |
 |-------------|-------------------|--------------|-----------|
-| Root account MFA + hardware token detection | IA-2(1), IA-2(6) | IA-2(1), IA-2(6) | IA-2(1), IA-2(6) (Policy Area 6) |
-| IAM user MFA (console access) | IA-2(1), IA-2(2) | IA-2(1), IA-2(2) | IA-2(1), IA-2(2) (Policy Area 6) |
-| Access key rotation (90-day) | IA-5(1), AC-2(1) | IA-5(1), AC-2(1) | IA-5(1), AC-2(1) (Policy Areas 5, 6) |
-| User inactivity detection | AC-2(3), AC-2(12) | AC-2(3), AC-2(12) | AC-2(3) (Policy Area 5) |
-| Password policy compliance | IA-5(1) | IA-5(1) | IA-5(1) (Policy Area 6) |
-| SNS alerting for non-compliant findings | SI-4(5), AU-6(1) | SI-4(5), AU-6(1) | SI-4(5) (Policy Area 12) |
-| CSV/JSON timestamped evidence export | AU-12, AU-6, CA-7 | AU-12, AU-6, CA-7 | AU-12, AU-6 (Policy Area 4) |
+| Root account MFA + hardware token detection | IA-2(1), IA-2(6) | IA-2(1), IA-2(6) | IA-2(1), IA-2(6) (P1) |
+| IAM user MFA (console access) | IA-2(1), IA-2(2) | IA-2(1), IA-2(2) | IA-2(1), IA-2(2) (P1) |
+| Access key rotation (90-day) | IA-5(1), AC-2(1) | IA-5(1), AC-2(1) | IA-5(1), AC-2(1) (P1) |
+| User inactivity detection | AC-2(3), AC-2(12) | AC-2(3), AC-2(12) | AC-2(3) (P1) |
+| Password policy compliance | IA-5(1) | IA-5(1) | IA-5(1) (P1) |
+| SNS alerting for non-compliant findings | SI-4(5), AU-6(1) | SI-4(5), AU-6(1) | SI-4(5) (P1) |
+| CSV/JSON timestamped evidence export | AU-12, AU-6, CA-7 | AU-12, AU-6, CA-7 | AU-12, AU-6 (P2) |
 
 ### Audit Relevance
 

@@ -195,8 +195,8 @@ def audit_root_account(iam):
     Audit the AWS root account for MFA status and device type.
 
     The root account is the highest-privilege identity in an AWS account
-    and cannot be replaced by an IAM user. FedRAMP High and CJIS v6.0
-    5.6.2.2 require MFA on privileged accounts; FedRAMP High further
+    and cannot be replaced by an IAM user. FedRAMP High and CJIS v6.1
+    IA-2(1) require MFA on privileged accounts; FedRAMP High further
     recommends a hardware MFA device for root specifically.
 
     get_account_summary() returns a SummaryMap of integer flags —
@@ -269,7 +269,7 @@ def audit_password_policy(iam):
     Audit the account's IAM password policy against FedRAMP High requirements.
 
     FedRAMP High IA-5(1) parameterizes NIST 800-53 Rev 5 password requirements.
-    CJIS v6.0 5.6.2.1 aligns with these same parameters as of December 2024.
+    CJIS v6.1 IA-5 aligns with these same parameters.
     This function evaluates seven checks and returns overall status plus
     per-check detail so auditors can see expected vs actual for each rule.
 
