@@ -7,7 +7,7 @@
 
 # IAM Audit
 
-A Python tool that audits all IAM users in your AWS account for MFA compliance.
+I built this to audit every IAM user in an AWS account for MFA compliance.
 
 ## Overview
 
